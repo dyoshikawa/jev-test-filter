@@ -82,10 +82,10 @@ export const USD_PER_MTOK = 0.042;
 /**
  * Replace C0/C1 control characters (ESC, CR, BEL, ...) with spaces so a
  * server-supplied error body cannot drive the terminal when it is printed.
+ * Tab and newline are kept so multi-line messages stay readable.
  */
 export function stripControlChars(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ");
 }
 
 /** What the caller can actually do about a failure. */

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Jev, JevError, Pacer, mapLimit } from "../src/jev.ts";
+import { Jev, JevError, Pacer, mapLimit, stripControlChars } from "../src/jev.ts";
 
 function ok(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 });
@@ -109,4 +109,8 @@ test("an HTTP error message has the server body's control characters stripped", 
     () => jev.ask({}, { q0: { type: "score", instructions: {}, criteria: ["a"] } }),
     (err: unknown) => err instanceof JevError && err.message === "HTTP 403: bad [2J   gone",
   );
+});
+
+test("stripControlChars keeps tab and newline", () => {
+  assert.equal(stripControlChars("a\tb\nc\u001bd\re"), "a\tb\nc d e");
 });
