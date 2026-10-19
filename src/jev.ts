@@ -408,7 +408,15 @@ export class Jev implements AskClient {
 
       const text = await res.text();
       if (res.ok) {
-        const parsed = JSON.parse(text);
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          // The SyntaxError message quotes the body; keep it out of the terminal raw.
+          throw new JevError(`invalid JSON response: ${stripControlChars(text.slice(0, 240))}`, {
+            status: res.status,
+          });
+        }
         this.pacer.settle(estimated, parsed.usage?.input_tokens ?? estimated);
         this.pacer.succeeded();
         this.calls += 1;

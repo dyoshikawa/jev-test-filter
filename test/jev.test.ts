@@ -114,3 +114,15 @@ test("an HTTP error message has the server body's control characters stripped", 
 test("stripControlChars keeps tab and newline", () => {
   assert.equal(stripControlChars("a\tb\nc\u001bd\re"), "a\tb\nc d e");
 });
+
+test("a non-JSON 200 body is reported with its control characters stripped", async () => {
+  const jev = new Jev({
+    apiKey: "k",
+    pacer: new Pacer(1e9, 1e9),
+    fetch: async () => new Response("\u001b[2Jnot json", { status: 200 }),
+  });
+  await assert.rejects(
+    () => jev.ask({}, { q0: { type: "score", instructions: {}, criteria: ["a"] } }),
+    (err: unknown) => err instanceof JevError && err.message === "invalid JSON response:  [2Jnot json",
+  );
+});
