@@ -97,3 +97,16 @@ test("mapLimit preserves input order", async () => {
   });
   assert.deepEqual(out, [30, 10, 20]);
 });
+
+test("an HTTP error message has the server body's control characters stripped", async () => {
+  const jev = new Jev({
+    apiKey: "k",
+    retries: 0,
+    pacer: new Pacer(1e9, 1e9),
+    fetch: async () => new Response("bad\u001b[2J\r\u0007\u009bgone", { status: 403 }),
+  });
+  await assert.rejects(
+    () => jev.ask({}, { q0: { type: "score", instructions: {}, criteria: ["a"] } }),
+    (err: unknown) => err instanceof JevError && err.message === "HTTP 403: bad [2J   gone",
+  );
+});

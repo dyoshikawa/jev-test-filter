@@ -79,6 +79,15 @@ export function fromEnv(names: readonly string[], env = process.env): string | n
 /** Published input price, USD per million input tokens. Output is not billed. */
 export const USD_PER_MTOK = 0.042;
 
+/**
+ * Replace C0/C1 control characters (ESC, CR, BEL, ...) with spaces so a
+ * server-supplied error body cannot drive the terminal when it is printed.
+ */
+export function stripControlChars(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+}
+
 /** What the caller can actually do about a failure. */
 export type JevErrorKind = "too_big" | "auth" | "transient" | "other";
 
@@ -410,7 +419,7 @@ export class Jev implements AskClient {
         return parsed;
       }
 
-      last = new JevError(`HTTP ${res.status}: ${text.slice(0, 240)}`, {
+      last = new JevError(`HTTP ${res.status}: ${stripControlChars(text.slice(0, 240))}`, {
         status: res.status,
         kind: Jev.classify(res.status, text),
       });

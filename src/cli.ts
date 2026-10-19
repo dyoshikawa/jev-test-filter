@@ -26,6 +26,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { stripControlChars } from "./jev.ts";
 import { displayName } from "./questions.ts";
 import { fullName } from "./filter.ts";
 import { loadDiff } from "./diff.ts";
@@ -318,7 +319,7 @@ async function main(): Promise<number> {
   try {
     args = parseCliArgs(process.argv.slice(2));
   } catch (err: unknown) {
-    process.stderr.write(`jev-test-filter: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`jev-test-filter: ${stripControlChars(err instanceof Error ? err.message : String(err))}\n`);
     return 2;
   }
   if (args.help) {
@@ -365,7 +366,7 @@ async function main(): Promise<number> {
       try {
         context = await loadContext(args.contextPath);
       } catch (err: unknown) {
-        process.stderr.write(`jev-test-filter: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.stderr.write(`jev-test-filter: ${stripControlChars(err instanceof Error ? err.message : String(err))}\n`);
         return 2;
       }
     }
@@ -437,7 +438,7 @@ if (isCliInvocation(process.argv[1], import.meta.url)) {
   main().then(
     (code) => { process.exitCode = code; },
     (err: unknown) => {
-      process.stderr.write(`jev-test-filter: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`jev-test-filter: ${stripControlChars(err instanceof Error ? err.message : String(err))}\n`);
       process.exitCode = 1;
     },
   );
