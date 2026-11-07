@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { displayName } from "./questions.ts";
+import { childEnv } from "./jev.ts";
 import { fullName } from "./filter.ts";
 import { loadDiff } from "./diff.ts";
 import { assessSnapshots, findSnapshotChangesInWorktree, loadSnapshotTestSources, snapshotTestFile } from "./snapshot.ts";
@@ -409,7 +410,7 @@ async function main(): Promise<number> {
       return 0;
     }
     return await new Promise<number>((resolve) => {
-      const child = spawn(argv[0]!, argv.slice(1), { stdio: "inherit" });
+      const child = spawn(argv[0]!, argv.slice(1), { stdio: "inherit", env: childEnv() });
       child.on("close", (code) => resolve(code ?? 1));
       child.on("error", (err) => {
         process.stderr.write(`jev-test-filter: ${err.message}\n`);

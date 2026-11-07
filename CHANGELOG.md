@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A test whose own body the change edits is now recognised as touched (and always selected) in cases that used to slip past: a repository `.gitattributes` marking files `-diff`/`binary` (the diff now runs with `--text --no-textconv`), paths git C-quotes (non-ASCII, quotes, backslashes), deletion-only hunks inside a test body, and runs from a subdirectory of the repository.
+- A title that is not a single string or template literal (`"a " + b`), or one holding an escape other than an escaped quote or backslash, is now dynamic instead of a wrong static name the runner pattern silently missed.
+- Tests inside a `describe.each` / `describe.for` suite (including tagged-template tables) are now dynamic, so the name pattern no longer drops them.
+- `--format jest` now joins nested names with single spaces, the spelling jest's `-t` matches (verified against jest 30).
+- A `cargo test` name defined by more than one crate root is now dynamic instead of being pinned to one file.
+- The truncated-diff guard counts only the tests the model's answers decided, so adding touched tests can no longer keep it from falling back to running everything.
+- The API key is no longer passed to the processes that run repository code (`--exec`, the Playwright and cargo listings).
+- A response's answers are only taken for the questions that request asked; a `retry-after` hint is capped at the existing backoff ceilings; non-numeric usage counts are ignored; a `--base` starting with `-` is refused.
+
 ## 0.1.3
 
 ### Added

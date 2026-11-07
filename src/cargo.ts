@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { parse } from "@ast-grep/napi";
+import { childEnv } from "./jev.ts";
 import { registerLanguages } from "./languages.ts";
 import type { TestCase } from "./types.ts";
 
@@ -118,6 +119,7 @@ export async function cargoList(cwd: string): Promise<string> {
   const { stdout } = await execFileAsync("cargo", ["test", "--quiet", "--", "--list"], {
     cwd,
     maxBuffer: 64 * 1024 * 1024,
+    env: childEnv(),
   });
   return stdout;
 }
@@ -125,21 +127,39 @@ export async function cargoList(cwd: string): Promise<string> {
 export async function listRustTests(cwd: string): Promise<TestCase[]> {
   const names = parseCargoList(await cargoList(cwd));
 
-  const located = new Map<string, Location>();
+  return locateRustTests(names, await readRustTests(cwd));
+}
+
+/** Every `#[test]` location per module path, across every Rust file. */
+async function readRustTests(cwd: string): Promise<Map<string, Location[]>> {
+  const located = new Map<string, Location[]>();
   for (const file of await rustFiles(cwd)) {
     const source = await readFile(join(cwd, file), "utf8");
-    for (const [path, at] of rustTestsIn(source, file)) located.set(path, at);
+    for (const [path, at] of rustTestsIn(source, file)) located.set(path, [...(located.get(path) ?? []), at]);
   }
+  return located;
+}
 
+/**
+ * Pin each cargo-listed name to its source location.
+ *
+ * Every file under `tests/` is its own crate root, so two of them can define
+ * the same module path, and cargo's listing does not say which target a name
+ * came from. Pinning such a name to one of the files would hide an edit to
+ * the other from the touched rule, so an ambiguous name is marked dynamic and
+ * is always selected instead.
+ */
+export function locateRustTests(names: string[], located: Map<string, Location[]>): TestCase[] {
   return names.map((name) => {
-    const at = located.get(name);
+    const ats = located.get(name) ?? [];
+    const at = ats.length === 1 ? ats[0] : undefined;
     return {
-      file: at?.file ?? "",
+      file: at?.file ?? ats[0]?.file ?? "",
       titlePath: name.split("::"),
       line: at?.line ?? 0,
       endLine: at?.endLine ?? 0,
       framework: "rust" as const,
-      dynamic: false,
+      dynamic: ats.length > 1,
     };
   });
 }

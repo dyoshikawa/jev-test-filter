@@ -331,7 +331,7 @@ before you hand-edit anything it prints.
 | Framework | Full name is joined with | Selection is expressed as | Order |
 | --- | --- | --- | --- |
 | `vitest` | `" > "` — `Cart > totals` | `-t '^(?:a > b\|c)$'` plus the files | pattern **before** the files |
-| `jest` | `" > "` | `-t '^(?:...)$'` plus the files | pattern **before** the files |
+| `jest` | a single space — `Cart totals` | `-t '^(?:a b\|c)$'` plus the files | pattern **before** the files |
 | `node` | a single space — `Cart totals` | one `--test-name-pattern '^(?:a b\|c)$'` plus the files | pattern **before** the files |
 | `bun` | a single space — `Cart totals` | one `--test-name-pattern '^(?:a b\|c)$'` plus the files | pattern **before** the files |
 | `playwright` | runner's test title and project | `--test-list .jev-test-filter/playwright-….txt` with `--exec`; otherwise `file:line` | exact list or positionals |
@@ -394,8 +394,9 @@ cargo 1.98.0 and go 1.26.2:
   all. `--json` still reports the per-subtest score, which is the finer signal
   and what a reader wants to see.
 
-The vitest, node:test, Bun, Playwright, Rust and Go spellings were each verified
-against the real runner. `jest` is emitted with the vitest shape and was not.
+The vitest, jest, node:test, Bun, Playwright, Rust and Go spellings were each
+verified against the real runner (jest 30: `-t '^(?:Suite t1)$'` runs the nested
+test, `-t '^(?:Suite > t1)$'` runs nothing).
 
 The `mode` field in `--json` names the emitted filter shape:
 
@@ -697,7 +698,14 @@ in.
 | `JEV_TEST_FILTER_TOKEN_BURST` | Client-side pacing burst. Default `1200000`. |
 
 The key is only ever sent to the API endpoint as an `Authorization` header. It
-is never written to the record, to `--json`, or to any log line.
+is never written to the record, to `--json`, or to any log line, and it is
+removed from the environment of the processes this tool starts to run
+repository code: the runner under `--exec` and the Playwright and cargo
+listings. That is not a sandbox -- on Linux a child running as the same user
+can still read the parent's environment from `/proc` -- so where the tests are
+less trusted than the key, select in one CI step without `--exec` and run the
+selection in a later step whose environment has no key. With `--format rust`
+the cargo listing builds and runs repository code during selection.
 
 ## Development
 

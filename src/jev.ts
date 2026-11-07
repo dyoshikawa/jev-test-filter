@@ -67,6 +67,17 @@ export const DEFAULT_MODEL = "jev-latest";
 export const API_KEY_VARS = ["TYPESAFE_API_KEY", "TYPESAFEAI_API_KEY"] as const;
 export const BASE_URL_VARS = ["TYPESAFE_BASE_URL", "TYPESAFEAI_BASE_URL"] as const;
 
+/**
+ * The environment for a child process that runs repository code: the
+ * runner under `--exec`, and the Playwright and cargo listings. The API key
+ * is this tool's credential, not the tests', so it is left out.
+ */
+export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const name of API_KEY_VARS) delete out[name];
+  return out;
+}
+
 /** First of these variables that is set and non-empty. */
 export function fromEnv(names: readonly string[], env = process.env): string | null {
   for (const n of names) {
@@ -400,6 +411,15 @@ export class Jev implements AskClient {
       const text = await res.text();
       if (res.ok) {
         const parsed = JSON.parse(text);
+        // A count that is not a finite non-negative number would turn the
+        // pacer's level into NaN (every later take() then spins) or into a
+        // wait of years; drop it and fall back to the estimate.
+        if (parsed.usage && typeof parsed.usage === "object") {
+          for (const key of ["input_tokens", "output_tokens"]) {
+            const v = parsed.usage[key];
+            if (!(typeof v === "number" && Number.isFinite(v) && v >= 0)) delete parsed.usage[key];
+          }
+        }
         this.pacer.settle(estimated, parsed.usage?.input_tokens ?? estimated);
         this.pacer.succeeded();
         this.calls += 1;
@@ -471,8 +491,10 @@ export class Jev implements AskClient {
  */
 function rateLimitWait(nth: number, baseMs: number, retryAfter?: string | null): Promise<void> {
   const hinted = retryAfter ? Number.parseFloat(retryAfter) * 1000 : Number.NaN;
+  // A hint is honoured only up to the same ceiling, so a server asking for a
+  // day cannot hold a CI job there instead of reaching the fallback.
   const wait = Number.isFinite(hinted)
-    ? hinted
+    ? Math.min(5_000, Math.max(0, hinted))
     : Math.min(5_000, baseMs * 1.5 ** (nth - 1)) * (0.5 + Math.random());
   return new Promise<void>((r) => setTimeout(r, wait));
 }
@@ -480,7 +502,7 @@ function rateLimitWait(nth: number, baseMs: number, retryAfter?: string | null):
 function backoff(attempt: number, retryAfter?: string | null): Promise<void> {
   const hinted = retryAfter ? Number.parseFloat(retryAfter) * 1000 : Number.NaN;
   const wait = Number.isFinite(hinted)
-    ? hinted
+    ? Math.min(20_000, Math.max(0, hinted))
     : Math.min(20_000, 500 * 2 ** attempt) * (0.5 + Math.random());
   return new Promise<void>((r) => setTimeout(r, wait));
 }

@@ -181,3 +181,11 @@ test("a dynamic go subtest does not drop the run to whole files", () => {
   assert.equal(f.mode, "pattern");
   assert.deepEqual(f.argv, ["-run", "^(?:TestTable)$", "./cart"]);
 });
+
+test("the jest pattern joins a nested name with single spaces, as jest's -t matches it", () => {
+  const a = mk("a.test.ts", ["Suite", "t1"], { framework: "jest" });
+  const b = mk("a.test.ts", ["Suite", "t2"], { framework: "jest" });
+  const c = mk("a.test.ts", ["Suite", "t3"], { framework: "jest" });
+  const f = buildFilter(sel([a, b, c], [a]), "jest");
+  assert.deepEqual(f.argv, ["-t", "^(?:Suite t1)$", "a.test.ts"]);
+});

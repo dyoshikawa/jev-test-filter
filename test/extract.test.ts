@@ -110,3 +110,61 @@ test("extractTests parses tsx", () => {
   const found = extractTests(src, "a.test.tsx", "vitest");
   assert.deepEqual(found[0]!.titlePath, ["renders"]);
 });
+
+test("extractTests marks a concatenated title dynamic instead of reading its first string", () => {
+  const src = "import { it } from 'vitest';\nconst role = 'x';\nit(\"rejects \" + \"admin bypass\", () => {});\nit('denies ' + role, () => {});";
+  const found = extractTests(src, "a.test.ts", "vitest");
+  assert.deepEqual(found.map((t) => t.dynamic), [true, true]);
+});
+
+test("extractTests marks a title with an escape it does not reproduce dynamic", () => {
+  const src = "import { it } from 'vitest';\nit('handles\\ttab title', () => {});\nit('caf\\u00e9', () => {});";
+  const found = extractTests(src, "a.test.ts", "vitest");
+  assert.deepEqual(found.map((t) => t.dynamic), [true, true]);
+});
+
+test("extractTests marks every test inside a describe.each or describe.for suite dynamic", () => {
+  const src = [
+    "import { describe, it } from 'vitest';",
+    "describe.each([1, 2])('suite %i', (n) => {",
+    "  it('adds', () => {});",
+    "});",
+    "describe.for([1, 2])('for %i', (n) => {",
+    "  it('adds', () => {});",
+    "});",
+    "describe.skipIf(false).each([1])('skip %i', (n) => {",
+    "  it('adds', () => {});",
+    "});",
+    "describe('plain', () => {",
+    "  it('adds', () => {});",
+    "});",
+  ].join("\n");
+  const found = extractTests(src, "a.test.ts", "vitest");
+  assert.deepEqual(found.map((t) => [t.titlePath[0], t.dynamic]), [
+    ["suite %i", true],
+    ["for %i", true],
+    ["skip %i", true],
+    ["plain", false],
+  ]);
+});
+
+test("extractTests keeps a tagged-template describe.each suite in the chain and marks it dynamic", () => {
+  const src = [
+    "import { describe, it, test } from 'vitest';",
+    "describe.each`",
+    "  a    | b",
+    "  ${1} | ${2}",
+    "`('sum $a', ({ a, b }) => {",
+    "  it('adds', () => {});",
+    "});",
+    "test.each`",
+    "  a",
+    "  ${1}",
+    "`('row $a', ({ a }) => {});",
+  ].join("\n");
+  const found = extractTests(src, "a.test.ts", "vitest");
+  assert.deepEqual(found.map((t) => [t.titlePath, t.dynamic]), [
+    [["sum $a", "adds"], true],
+    [["row $a"], true],
+  ]);
+});

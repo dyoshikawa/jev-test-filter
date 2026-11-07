@@ -36,7 +36,11 @@ export interface SnapshotTestSources {
 const execFileAsync = promisify(execFile);
 
 async function readSource(cwd: string, file: string, revision: "HEAD" | ":" | null): Promise<string> {
-  if (revision === null) return readFile(join(cwd, file), "utf8");
+  if (revision === null) {
+    // Diff paths are relative to the repository root, not to `cwd`.
+    const cdup = await execFileAsync("git", ["rev-parse", "--show-cdup"], { cwd }).then((r) => r.stdout.trim(), () => "");
+    return readFile(join(cwd, cdup, file), "utf8");
+  }
   const spec = revision === ":" ? `:${file}` : `HEAD:${file}`;
   const { stdout } = await execFileAsync("git", ["show", spec], { cwd, maxBuffer: 8 * 1024 * 1024 });
   return stdout;

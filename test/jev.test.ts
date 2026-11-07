@@ -97,3 +97,16 @@ test("mapLimit preserves input order", async () => {
   });
   assert.deepEqual(out, [30, 10, 20]);
 });
+
+test("a usage count that is not a finite non-negative number does not poison the pacer", async () => {
+  const pacer = new Pacer(1e9, 1e9);
+  const jev = new Jev({
+    apiKey: "k",
+    pacer,
+    fetch: async () => ok({ answers: {}, usage: { input_tokens: "10", output_tokens: -5 } }),
+  });
+  await jev.ask({ diff: "x" }, { q0000: { type: "score", instructions: {}, criteria: ["a"] } });
+  assert.ok(Number.isFinite(pacer.available()));
+  assert.equal(jev.spent.inputTokens, 0);
+  assert.equal(jev.spent.outputTokens, 0);
+});

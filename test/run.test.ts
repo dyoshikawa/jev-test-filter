@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collect, score, replay, pickFramework, run } from "../src/run.ts";
+import { collect, score, replay, pickFramework, run, smallSelection } from "../src/run.ts";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -90,4 +90,36 @@ test("Playwright の一覧取得に失敗したら絞り込まず全件を実行
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("score takes from a response only the answers its own request asked", async () => {
+  const tests = [mk("a.test.ts", ["a"]), mk("a.test.ts", ["b"], { line: 3, endLine: 4 })];
+  const c: AskClient = {
+    ...client({}),
+    // The first batch's response also answers the second batch's question.
+    askSplitting: async (_state, questions) => Object.keys(questions).includes("q0000")
+      ? { answers: { q0000: { score: 3, confidence: 0.9 }, q0001: { score: 0, confidence: 0.9 } } }
+      : { answers: {} },
+  };
+  const answers = await score(tests, { reviewing: "a git diff", changed_files: [], stat: "", diff: "", truncated: false, omitted_files: [] }, {
+    client: c, batchSize: 1, concurrency: 1,
+  });
+  assert.equal(answers.get("q0000")?.value, 3);
+  assert.equal(answers.get("q0001"), null);
+});
+
+test("smallSelection counts only the tests the model's answers decided", () => {
+  const verdict = (reason: string, selected: boolean, i: number) =>
+    ({ id: `q${i}`, test: mk("a.test.ts", [`t${i}`], { line: i * 2 + 1, endLine: i * 2 + 2 }), answer: null, reason, selected }) as never;
+  // Ten untouched tests all deselected, padded by ten touched new tests.
+  const verdicts = [
+    ...Array.from({ length: 10 }, (_, i) => verdict("below", false, i)),
+    ...Array.from({ length: 10 }, (_, i) => verdict("touched", true, i + 10)),
+    verdict("dynamic", true, 20),
+    verdict("quarantined", false, 21),
+  ];
+  const selection = { verdicts, selected: [], all: [], fallback: null };
+  assert.equal(smallSelection(selection), true);
+  // Nothing left for the answers to decide: not small.
+  assert.equal(smallSelection({ ...selection, verdicts: verdicts.slice(10) }), false);
 });

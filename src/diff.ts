@@ -16,6 +16,47 @@ export type ChangedRanges = Map<string, Array<[number, number]>>;
 /** git's own prefixes, including the `diff.mnemonicPrefix` spellings. */
 const PREFIX = /^[abciwo]\//;
 
+const C_ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+
+/**
+ * Undo git's C-style path quoting.
+ *
+ * git wraps a path holding a double quote, a backslash, a control character
+ * or -- unless `core.quotePath` is off -- any non-ASCII byte in double quotes,
+ * with `\ooo` octal bytes and `\n`-style escapes inside. Left quoted, the
+ * path matches no discovered file, and a test the change edited is no longer
+ * recognised as touched.
+ */
+export function unquotePath(raw: string): string {
+  const s = raw.trim();
+  if (!(s.length >= 2 && s.startsWith('"') && s.endsWith('"'))) return s;
+  const body = s.slice(1, -1);
+  const bytes: number[] = [];
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]!;
+    if (c !== "\\" || i + 1 >= body.length) {
+      bytes.push(...Buffer.from(c, "utf8"));
+      continue;
+    }
+    const octal = /^[0-7]{1,3}/.exec(body.slice(i + 1, i + 4));
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8) & 0xff);
+      i += octal[0].length;
+      continue;
+    }
+    const n = body[i + 1]!;
+    bytes.push(...(C_ESCAPES[n] === undefined ? Buffer.from(n, "utf8") : [C_ESCAPES[n]!]));
+    i += 1;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/** The repository path a `--- ` / `+++ ` header names, or null for /dev/null. */
+function headerPath(line: string): string | null {
+  const path = unquotePath(line.slice(4));
+  return path === "/dev/null" ? null : path.replace(PREFIX, "");
+}
+
 /**
  * Parse the `@@ -a,b +c,d @@` headers of a unified diff.
  *
@@ -35,11 +76,10 @@ export function parseUnifiedDiff(text: string): ChangedRanges {
       continue;
     }
     if (!inHunk && line.startsWith("+++ ")) {
-      const path = line.slice(4).trim();
       // A post-image of /dev/null is a deletion: nothing in the new tree
       // changed, so there is no line here a test's body can overlap. The
       // deletion still reaches the model, through `splitDiffByFile`.
-      file = path === "/dev/null" ? null : path.replace(PREFIX, "");
+      file = headerPath(line);
       if (file && !byFile.has(file)) byFile.set(file, []);
       continue;
     }
@@ -50,8 +90,12 @@ export function parseUnifiedDiff(text: string): ChangedRanges {
     if (!m) continue;
     const start = Number(m[1]);
     const count = m[2] === undefined ? 1 : Number(m[2]);
-    if (count === 0) continue;
-    byFile.get(file)!.push([start, start + count - 1]);
+    // A pure deletion has no post-image line of its own: it sits between
+    // lines `start` and `start + 1`. Both are recorded, so lines removed from
+    // inside a test body still touch that test (and a test ending at `start`
+    // or beginning at `start + 1` is conservatively touched as well).
+    if (count === 0) byFile.get(file)!.push([Math.max(start, 1), start + 1]);
+    else byFile.get(file)!.push([start, start + count - 1]);
   }
   for (const [k, ranges] of byFile) {
     if (ranges.length === 0) byFile.delete(k);
@@ -120,13 +164,8 @@ export function splitDiffByFile(text: string): Map<string, string> {
     }
     // Headers only before the first hunk; see `parseUnifiedDiff`.
     if (inHunk) continue;
-    if (line.startsWith("--- ")) {
-      const path = line.slice(4).trim();
-      pre = path === "/dev/null" ? null : path.replace(PREFIX, "");
-    } else if (line.startsWith("+++ ")) {
-      const path = line.slice(4).trim();
-      post = path === "/dev/null" ? null : path.replace(PREFIX, "");
-    }
+    if (line.startsWith("--- ")) pre = headerPath(line);
+    else if (line.startsWith("+++ ")) post = headerPath(line);
   }
   flush();
   return out;
@@ -149,7 +188,28 @@ export interface Diff {
   text: string;
   /** `git diff --stat`, which survives truncation of the text. */
   stat: string;
+  /**
+   * Ranges keyed by path relative to `cwd`, the way test discovery names
+   * files. git prints repository-root-relative paths, so from a subdirectory
+   * the two spellings differ; files outside `cwd` are left out here (no
+   * discovered test can live there) but stay in `text` for the model.
+   */
   ranges: ChangedRanges;
+}
+
+/** `git rev-parse --show-prefix`: where `cwd` sits inside the repository, `""` at its root. */
+export async function repoPrefix(cwd: string): Promise<string> {
+  return (await git(["rev-parse", "--show-prefix"], cwd)).trim();
+}
+
+/** Re-key root-relative ranges to paths relative to the directory at `prefix`. */
+export function rebaseRanges(ranges: ChangedRanges, prefix: string): ChangedRanges {
+  if (prefix === "") return ranges;
+  const out: ChangedRanges = new Map();
+  for (const [file, list] of ranges) {
+    if (file.startsWith(prefix)) out.set(file.slice(prefix.length), list);
+  }
+  return out;
 }
 
 /**
@@ -167,15 +227,26 @@ export async function loadDiff({ cwd = process.cwd(), base = null, staged = fals
   // from the ranges, because a deleted file has no post-image line for a test
   // body to overlap; but removing a source file is exactly the kind of change
   // the model has to see, so it stays in the text.
-  const common = ["--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"];
+  //
+  // `--text` and `--no-textconv` keep repository attributes (`-diff`,
+  // `binary`, a `diff=<driver>` with a textconv) and binary autodetection from
+  // replacing a section with "Binary files ... differ": such a section has no
+  // header or hunk, so an edited test in it would never count as touched.
+  // `core.quotePath=false` keeps non-ASCII paths unquoted; `unquotePath`
+  // handles what git still quotes.
+  const common = ["--no-color", "--no-ext-diff", "--no-textconv", "--text", "--src-prefix=a/", "--dst-prefix=b/"];
+  // A base spelled like an option would be read by git as one
+  // (`--output=<file>` writes the diff elsewhere and leaves this run empty).
+  if (base?.startsWith("-")) throw new Error(`invalid base ref: ${base}`);
   const range: string[] = [];
   if (staged) range.push("--cached");
   if (base) range.push(`${base}...HEAD`);
   else if (!staged) range.push("HEAD");
 
-  const text = await git(["diff", "--unified=0", ...common, ...range], cwd);
-  const stat = await git(["diff", "--stat", ...common, ...range], cwd);
-  return { text, stat, ranges: parseUnifiedDiff(text) };
+  const config = ["-c", "core.quotePath=false"];
+  const text = await git([...config, "diff", "--unified=0", ...common, ...range], cwd);
+  const stat = await git([...config, "diff", "--stat", ...common, ...range], cwd);
+  return { text, stat, ranges: rebaseRanges(parseUnifiedDiff(text), await repoPrefix(cwd)) };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseUnifiedDiff, touchesChange, splitDiffByFile } from "../src/diff.ts";
+import { parseUnifiedDiff, rebaseRanges, touchesChange, splitDiffByFile, unquotePath } from "../src/diff.ts";
 
 const DIFF = [
   "diff --git a/src/cart.ts b/src/cart.ts",
@@ -59,4 +59,45 @@ test("splitDiffByFile keeps each file's own section", () => {
   assert.deepEqual([...parts.keys()], ["src/cart.ts", "src/gone.ts"]);
   assert.match(parts.get("src/cart.ts")!, /fresh\(\)/);
   assert.equal(parts.get("src/cart.ts")!.includes("everything()"), false);
+});
+
+test("unquotePath decodes git's C-quoted spelling", () => {
+  assert.equal(unquotePath('"b/t\\303\\251st.test.ts"'), "b/tést.test.ts");
+  assert.equal(unquotePath('"b/a\\"q\\\\b\\tc.ts"'), 'b/a"q\\b\tc.ts');
+  assert.equal(unquotePath("b/plain.ts"), "b/plain.ts");
+});
+
+test("parseUnifiedDiff and splitDiffByFile unquote a quoted header", () => {
+  const d = [
+    'diff --git "a/t\\303\\251st.test.ts" "b/t\\303\\251st.test.ts"',
+    '--- "a/t\\303\\251st.test.ts"',
+    '+++ "b/t\\303\\251st.test.ts"',
+    "@@ -3,1 +3,1 @@",
+    "-a",
+    "+b",
+  ].join("\n");
+  assert.deepEqual([...parseUnifiedDiff(d).keys()], ["tést.test.ts"]);
+  assert.deepEqual([...splitDiffByFile(d).keys()], ["tést.test.ts"]);
+});
+
+test("parseUnifiedDiff records a pure deletion as the boundary it sits on", () => {
+  const d = "+++ b/a.ts\n@@ -5,2 +4,0 @@\n-x\n-y\n";
+  const ranges = parseUnifiedDiff(d);
+  assert.deepEqual(ranges.get("a.ts"), [[4, 5]]);
+  // A test spanning lines 3-7 had lines removed from its body.
+  assert.equal(touchesChange(ranges, "a.ts", 3, 7), true);
+  assert.equal(touchesChange(ranges, "a.ts", 8, 9), false);
+});
+
+test("parseUnifiedDiff clamps a deletion at the top of the file to line 1", () => {
+  assert.deepEqual(parseUnifiedDiff("+++ b/a.ts\n@@ -1,2 +0,0 @@\n-x\n-y\n").get("a.ts"), [[1, 1]]);
+});
+
+test("rebaseRanges re-keys to the subdirectory and drops files outside it", () => {
+  const ranges = new Map<string, Array<[number, number]>>([
+    ["packages/pkg/test/a.test.ts", [[1, 2]]],
+    ["test/a.test.ts", [[3, 4]]],
+  ]);
+  assert.deepEqual([...rebaseRanges(ranges, "packages/pkg/")], [["test/a.test.ts", [[1, 2]]]]);
+  assert.equal(rebaseRanges(ranges, ""), ranges);
 });

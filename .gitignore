@@ -3,3 +3,4 @@ dist/
 .jev-test-filter/
 *.tsbuildinfo
 .DS_Store
+.env.local

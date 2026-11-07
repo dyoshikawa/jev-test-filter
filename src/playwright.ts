@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { extractTests } from "./extract.ts";
+import { childEnv } from "./jev.ts";
 import type { TestCase } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
@@ -57,7 +58,7 @@ export function attachPlaywrightRanges(listed: TestCase[], sourceCases: TestCase
 export async function listPlaywrightTests(cwd: string, command: string[]): Promise<TestCase[]> {
   if (command.length === 0) throw new Error("a Playwright command is required");
   const { stdout } = await execFileAsync(command[0]!, [...command.slice(1), "--list", "--reporter=json"], {
-    cwd, maxBuffer: 128 * 1024 * 1024,
+    cwd, maxBuffer: 128 * 1024 * 1024, env: childEnv(),
   });
   const listed = parsePlaywrightList(JSON.parse(stdout), cwd);
   const sourceCases: TestCase[] = [];

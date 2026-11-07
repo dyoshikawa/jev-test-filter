@@ -13,9 +13,13 @@ import type { SgNode } from "@ast-grep/napi";
 import { langFor } from "./framework.ts";
 import type { Framework, TestCase } from "./types.ts";
 
-/** `describe(...)` and its spellings; Playwright's `test.describe` with its own modifiers. */
+/**
+ * `describe(...)` and its spellings; Playwright's `test.describe` with its own
+ * modifiers. A modifier's argument is a call or a tagged-template table
+ * (`describe.each\`...\``).
+ */
 const SUITE_CALLEE =
-  "^(x|f)?(describe|suite|context)(\\.(only|skip|todo|concurrent|sequential|shuffle|skipIf|runIf|if|each|for)(\\([\\s\\S]*\\))?)*$" +
+  "^(x|f)?(describe|suite|context)(\\.(only|skip|todo|concurrent|sequential|shuffle|skipIf|runIf|if|each|for)(\\([\\s\\S]*\\)|`[\\s\\S]*`)?)*$" +
   "|^test\\.describe(\\.(serial|parallel|only|skip|fixme|configure)(\\([\\s\\S]*\\))?)*$";
 
 /** The names node:test's context goes by, for `t.test("subtest", fn)`. */
@@ -30,7 +34,7 @@ const SUBTEST_INSIDE = {
 
 /** `it`/`test` with modifiers; `Deno.test`; node:test's subtest on the context. */
 const TEST_CALLEE =
-  "^(x|f)?(it|test)(\\.(only|skip|todo|concurrent|sequential|fails|fixme|slow|skipIf|runIf|if|todoIf|failsIf|each|for)(\\([\\s\\S]*\\))?)*$" +
+  "^(x|f)?(it|test)(\\.(only|skip|todo|concurrent|sequential|fails|fixme|slow|skipIf|runIf|if|todoIf|failsIf|each|for)(\\([\\s\\S]*\\)|`[\\s\\S]*`)?)*$" +
   "|^Deno\\.test(\\.(only|ignore))?$" +
   `|^${SUBTEST_CONTEXT}\\.test$`;
 
@@ -109,12 +113,21 @@ const SUITE_RULE = {
 export function literalTitle(raw: string): string | null {
   const q = raw[0];
   if (q !== "'" && q !== '"' && q !== "`") return null;
+  if (raw.length < 2 || raw.at(-1) !== q) return null;
   const body = raw.slice(1, -1);
   if (q === "`" && /\$\{/.test(body)) return null;
+  // Only an escaped backslash or quote is decoded here. Any other escape
+  // (`\t`, `\u00e9`, a line continuation) has a runtime spelling this
+  // function does not reproduce, and a wrong static name is a test the
+  // runner pattern silently leaves out -- so the title counts as dynamic.
+  if (/\\[^\\'"`]/.test(body)) return null;
   return body.replace(/\\(.)/g, "$1");
 }
 
-/** `.each(...)` / `.for(...)` generate one test per row, so no static title names them. */
+/**
+ * `.each(...)` / `.for(...)` generate one test per row, so no static title
+ * names them -- on the test itself or on any suite around it.
+ */
 const GENERATED = /\.(each|for)\b/;
 
 interface Found {
@@ -127,12 +140,15 @@ interface Found {
 function collect(root: SgNode, rule: unknown): Found[] {
   return root.findAll({ rule: rule as never }).map((node) => {
     const range = node.range();
-    const raw = node.getMatch("TITLE")?.text() ?? null;
+    // Only a single string or template literal is a static title. Anything
+    // else -- `"a " + b`, a variable, a call -- is only known at run time.
+    const m = node.getMatch("TITLE");
+    const literal = m !== null && (m.kind() === "string" || m.kind() === "template_string");
     return {
       start: range.start.index,
       end: range.end.index,
       node,
-      title: raw === null ? null : literalTitle(raw),
+      title: literal && m ? literalTitle(m.text()) : null,
     };
   });
 }
@@ -155,7 +171,7 @@ export function extractTests(source: string, file: string, framework: Framework)
       .sort((a, b) => a.start - b.start || b.end - a.end);
 
     const parts = [...chain, t];
-    const dynamic = parts.some((p) => p.title === null) || GENERATED.test(calleeText(t.node));
+    const dynamic = parts.some((p) => p.title === null || GENERATED.test(calleeText(p.node)));
     const range = t.node.range();
     return {
       file,

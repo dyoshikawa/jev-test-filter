@@ -4,8 +4,8 @@
  * Three shapes, one per framework family, and the differences between them
  * were measured rather than assumed:
  *
- *   - Vitest joins a full name with `" > "`; node:test joins it with a single
- *     space. A pattern in the wrong spelling selects nothing and says nothing.
+ *   - Vitest joins a full name with `" > "`; node:test and jest join it with
+ *     a single space. A pattern in the wrong spelling selects nothing and says nothing.
  *   - node:test ORs repeated `--test-name-pattern` flags, and a pattern that
  *     matches a SUITE name runs every test under it. One flag, one
  *     alternation of anchored full names, is the only safe shape.
@@ -56,7 +56,9 @@ export function escapeRegExp(s: string): string {
 export function fullName(t: TestCase): string {
   if (t.framework === "rust") return t.titlePath.join("::");
   if (t.framework === "go") return t.titlePath.join("/");
-  const sep = t.framework === "node" || t.framework === "bun" ? " " : " > ";
+  // jest's -t matches the describe names and the title joined by single
+  // spaces, like node:test; only vitest (and Playwright) use " > ".
+  const sep = t.framework === "node" || t.framework === "bun" || t.framework === "jest" ? " " : " > ";
   return t.titlePath.join(sep);
 }
 

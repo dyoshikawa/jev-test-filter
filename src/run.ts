@@ -115,11 +115,14 @@ export async function score(
   }
 
   const responses = await mapLimit(batches, concurrency, (batch) => jev.askSplitting(state, batch));
-  for (const res of responses) {
+  // A response answers only the questions its own request asked: an id from
+  // another batch, or one a context skipped, is not taken from it.
+  responses.forEach((res, i) => {
+    const batch = batches[i]!;
     for (const [id, raw] of Object.entries(res.answers ?? {})) {
-      if (out.has(id)) out.set(id, readAnswer(raw));
+      if (Object.hasOwn(batch, id)) out.set(id, readAnswer(raw));
     }
-  }
+  });
   return out;
 }
 
@@ -195,6 +198,12 @@ function everything(tests: TestCase[], reason: string): Selection {
   };
 }
 
+/** Did the model's answers keep fewer than half of the tests they decided? */
+export function smallSelection(selection: Selection): boolean {
+  const decided = selection.verdicts.filter((v) => v.reason !== "quarantined" && v.reason !== "touched" && v.reason !== "dynamic");
+  return decided.length > 0 && decided.filter((v) => v.selected).length / decided.length < 0.5;
+}
+
 export async function run(opts: RunOptions = {}): Promise<RunResult> {
   const cwd = opts.cwd ?? process.cwd();
   const diff = await loadDiff({ cwd, base: opts.base ?? null, staged: opts.staged ?? false });
@@ -264,9 +273,11 @@ export async function run(opts: RunOptions = {}): Promise<RunResult> {
 
   // A truncated diff that still deselects most of the suite is a selection
   // made from a state that was missing the change it should have judged.
-  // Quarantined tests were never candidates, so they count on neither side.
-  const candidates = all.length - quarantined.size;
-  if (selection.fallback === null && state.truncated && candidates > 0 && selection.selected.length / candidates < 0.5) {
+  // Only the tests the model's answers decided count: quarantined tests were
+  // never candidates, and touched or dynamic tests are selected whatever the
+  // answers say -- counting them would let a change that adds enough new
+  // tests keep the ratio up and the guard silent.
+  if (selection.fallback === null && state.truncated && smallSelection(selection)) {
     selection = everything(all, "the diff did not fit the state budget and the selection was small");
   }
 

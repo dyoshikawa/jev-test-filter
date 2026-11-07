@@ -79,7 +79,8 @@ Measured, not assumed. Getting a row wrong is silent.
 
 | Runner | Full name | Selection | Watch for |
 | --- | --- | --- | --- |
-| vitest, jest | joined `" > "` | `-t '^(?:A\|B)$'` + files | pattern order does not matter |
+| vitest | joined `" > "` | `-t '^(?:A\|B)$'` + files | pattern order does not matter |
+| jest | joined `" "` (one space) | `-t '^(?:A\|B)$'` + files | `-t '^(?:Suite > t1)$'` matches nothing in jest |
 | node:test | joined `" "` (one space) | `--test-name-pattern '^(?:A\|B)$'` + files | **flag must precede the files**; one flag only — a pattern matching a *suite* runs all its children |
 | bun:test | joined `" "` (one space) | `--test-name-pattern '^(?:A\|B)$'` + files | The reporter shows `Cart > totals`, but the name pattern matches `Cart totals`. |
 | @playwright/test | runner-listed project, file and titles | `--test-list <file>` with `--exec`; otherwise `file:line` | `--exec` first collects with `--list --reporter=json`, including generated tests and project variants. |

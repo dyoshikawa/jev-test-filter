@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isTestAttribute, modulePrefix, parseCargoList, rustTestsIn } from "../src/cargo.ts";
+import { isTestAttribute, locateRustTests, modulePrefix, parseCargoList, rustTestsIn } from "../src/cargo.ts";
 
 test("parseCargoList takes the test lines and nothing else", () => {
   const out = `
@@ -63,4 +63,16 @@ test("rustTestsIn prefixes by the file's own module path", () => {
   const src = "#[test]\nfn a() {}\n";
   assert.deepEqual([...rustTestsIn(src, "src/cart/discount.rs").keys()], ["cart::discount::a"]);
   assert.deepEqual([...rustTestsIn(src, "tests/integration.rs").keys()], ["a"]);
+});
+
+test("locateRustTests marks a name two crate roots define dynamic instead of pinning one", () => {
+  const located = new Map([
+    ["it_works", [{ file: "tests/a.rs", line: 2, endLine: 4 }, { file: "tests/b.rs", line: 2, endLine: 4 }]],
+    ["only_here", [{ file: "tests/a.rs", line: 6, endLine: 8 }]],
+  ]);
+  const found = locateRustTests(["it_works", "only_here"], located);
+  assert.deepEqual(found.map((t) => [t.titlePath.join("::"), t.dynamic, t.line]), [
+    ["it_works", true, 0],
+    ["only_here", false, 6],
+  ]);
 });
