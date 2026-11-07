@@ -120,8 +120,18 @@ export function literalTitle(raw: string): string | null {
   // (`\t`, `\u00e9`, a line continuation) has a runtime spelling this
   // function does not reproduce, and a wrong static name is a test the
   // runner pattern silently leaves out -- so the title counts as dynamic.
-  if (/\\[^\\'"`]/.test(body)) return null;
-  return body.replace(/\\(.)/g, "$1");
+  let decoded = "";
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== "\\") {
+      decoded += body[i];
+      continue;
+    }
+    const next = body[i + 1];
+    if (next === undefined || !"\\'\"`".includes(next)) return null;
+    decoded += next;
+    i += 1;
+  }
+  return decoded;
 }
 
 /**

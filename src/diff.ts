@@ -51,6 +51,20 @@ export function unquotePath(raw: string): string {
   return Buffer.from(bytes).toString("utf8");
 }
 
+/**
+ * The path of a `diff --git a/<p> b/<p>` line when both sides name the same
+ * path, which is the only spelling that can be split unambiguously.
+ */
+function gitHeaderPath(line: string): string | null {
+  const rest = line.slice("diff --git ".length);
+  if ((rest.length - 5) % 2 !== 0 || rest.length < 7) return null;
+  const n = (rest.length - 5) / 2;
+  const a = rest.slice(0, n + 2);
+  const b = rest.slice(n + 3);
+  if (rest[n + 2] !== " " || !PREFIX.test(a) || !PREFIX.test(b) || a.slice(2) !== b.slice(2)) return null;
+  return a.slice(2);
+}
+
 /** The repository path a `--- ` / `+++ ` header names, or null for /dev/null. */
 function headerPath(line: string): string | null {
   const path = unquotePath(line.slice(4));
@@ -142,18 +156,23 @@ export function splitDiffByFile(text: string): Map<string, string> {
   let buf: string[] = [];
   let post: string | null = null;
   let pre: string | null = null;
+  let named: string | null = null;
   let inHunk = false;
   const flush = () => {
-    const key = post ?? pre;
+    // A section with no `---`/`+++` (binary, mode-only) is still a change
+    // the model should see, named by its `diff --git` line.
+    const key = post ?? pre ?? named;
     if (key && buf.length > 0) out.set(key, buf.join("\n"));
     buf = [];
     post = null;
     pre = null;
+    named = null;
     inHunk = false;
   };
   for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       flush();
+      named = gitHeaderPath(line);
       buf.push(line);
       continue;
     }
@@ -228,13 +247,18 @@ export async function loadDiff({ cwd = process.cwd(), base = null, staged = fals
   // body to overlap; but removing a source file is exactly the kind of change
   // the model has to see, so it stays in the text.
   //
-  // `--text` and `--no-textconv` keep repository attributes (`-diff`,
-  // `binary`, a `diff=<driver>` with a textconv) and binary autodetection from
-  // replacing a section with "Binary files ... differ": such a section has no
-  // header or hunk, so an edited test in it would never count as touched.
-  // `core.quotePath=false` keeps non-ASCII paths unquoted; `unquotePath`
-  // handles what git still quotes.
-  const common = ["--no-color", "--no-ext-diff", "--no-textconv", "--text", "--src-prefix=a/", "--dst-prefix=b/"];
+  // `--no-textconv` keeps a repository `diff=<driver>` attribute from running
+  // a textconv over the text, and `--no-relative` keeps a user's
+  // `diff.relative` from making the paths cwd-relative (`rebaseRanges`
+  // expects them from the repository root). `core.quotePath=false` keeps
+  // non-ASCII paths unquoted; `unquotePath` handles what git still quotes.
+  //
+  // A file git treats as binary -- by content, or because a repository
+  // `.gitattributes` says `-diff`/`binary` -- is printed as "Binary files ...
+  // differ" with no hunk, so nothing in it would count as touched. Its bytes
+  // are not wanted in the state either, so instead of `--text` the binary
+  // files are listed with `--numstat` and touched whole.
+  const common = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/", "--dst-prefix=b/"];
   // A base spelled like an option would be read by git as one
   // (`--output=<file>` writes the diff elsewhere and leaves this run empty).
   if (base?.startsWith("-")) throw new Error(`invalid base ref: ${base}`);
@@ -246,7 +270,19 @@ export async function loadDiff({ cwd = process.cwd(), base = null, staged = fals
   const config = ["-c", "core.quotePath=false"];
   const text = await git([...config, "diff", "--unified=0", ...common, ...range], cwd);
   const stat = await git([...config, "diff", "--stat", ...common, ...range], cwd);
-  return { text, stat, ranges: rebaseRanges(parseUnifiedDiff(text), await repoPrefix(cwd)) };
+  const numstat = await git(["diff", "--numstat", "-z", "--no-renames", ...common, ...range], cwd);
+  const ranges = parseUnifiedDiff(text);
+  for (const file of binaryFiles(numstat)) ranges.set(file, [[1, Number.MAX_SAFE_INTEGER]]);
+  return { text, stat, ranges: rebaseRanges(ranges, await repoPrefix(cwd)) };
+}
+
+/** The files `git diff --numstat -z --no-renames` reports as binary (`-\t-\t<path>`). */
+export function binaryFiles(numstat: string): string[] {
+  return numstat
+    .split("\0")
+    .filter((entry) => entry.startsWith("-\t-\t"))
+    .map((entry) => entry.slice(4))
+    .filter((file) => file !== "");
 }
 
 /**

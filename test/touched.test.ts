@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDiff } from "../src/diff.ts";
+import { loadDiff, splitDiffByFile } from "../src/diff.ts";
 import { run } from "../src/run.ts";
 import type { AskClient } from "../src/jev.ts";
 import { gitEnv } from "./git-env.ts";
@@ -71,8 +71,11 @@ test("a .gitattributes -diff does not hide an edited test from the touched rule"
     rewrite(cwd, "auth.test.ts", "const a = 1;", "const a = 0;"));
   try {
     const diff = await loadDiff({ cwd: r.cwd, base: "HEAD~1" });
-    assert.doesNotMatch(diff.text, /^Binary files/m);
-    assert.deepEqual(await reasons(r.cwd), { "rejects a bad password": "touched", other: "below" });
+    // The bytes stay out of the state, but the file is still named in it.
+    assert.match(diff.text, /^Binary files/m);
+    assert.deepEqual([...splitDiffByFile(diff.text).keys()], ["auth.test.ts"]);
+    // No hunk says which lines changed, so every test in the file is touched.
+    assert.deepEqual(await reasons(r.cwd), { "rejects a bad password": "touched", other: "touched" });
   } finally {
     r.done();
   }
@@ -108,6 +111,18 @@ test("running from a subdirectory still marks the edited test touched", async ()
     const root = await run({ cwd: r.cwd, base: "HEAD~1", client: zero, format: "vitest" });
     const touched = root.selection.verdicts.filter((v) => v.reason === "touched").map((v) => v.test.file);
     assert.deepEqual(touched, ["packages/pkg/test/auth.test.ts"]);
+  } finally {
+    r.done();
+  }
+});
+
+test("a user's diff.relative does not break the subdirectory re-keying", async () => {
+  const r = repo({ "packages/pkg/test/auth.test.ts": AUTH }, (cwd) =>
+    rewrite(cwd, "packages/pkg/test/auth.test.ts", "const a = 1;", "const a = 0;"));
+  try {
+    git(r.cwd, "config", "diff.relative", "true");
+    const sub = join(r.cwd, "packages/pkg");
+    assert.deepEqual([...(await loadDiff({ cwd: sub, base: "HEAD~1" })).ranges.keys()], ["test/auth.test.ts"]);
   } finally {
     r.done();
   }

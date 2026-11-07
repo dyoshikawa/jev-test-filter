@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- A test whose own body the change edits is now recognised as touched (and always selected) in cases that used to slip past: a repository `.gitattributes` marking files `-diff`/`binary` (the diff now runs with `--text --no-textconv`), paths git C-quotes (non-ASCII, quotes, backslashes), deletion-only hunks inside a test body, and runs from a subdirectory of the repository.
+- A test whose own body the change edits is now recognised as touched (and always selected) in cases that used to slip past: a repository `.gitattributes` marking files `-diff`/`binary` (binary-treated files now count as touched whole, and textconv drivers are ignored), paths git C-quotes (non-ASCII, quotes, backslashes), deletion-only hunks inside a test body, and runs from a subdirectory of the repository.
 - A title that is not a single string or template literal (`"a " + b`), or one holding an escape other than an escaped quote or backslash, is now dynamic instead of a wrong static name the runner pattern silently missed.
 - Tests inside a `describe.each` / `describe.for` suite (including tagged-template tables) are now dynamic, so the name pattern no longer drops them.
 - `--format jest` now joins nested names with single spaces, the spelling jest's `-t` matches (verified against jest 30).

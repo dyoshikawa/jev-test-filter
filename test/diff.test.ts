@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseUnifiedDiff, rebaseRanges, touchesChange, splitDiffByFile, unquotePath } from "../src/diff.ts";
+import { binaryFiles, parseUnifiedDiff, rebaseRanges, touchesChange, splitDiffByFile, unquotePath } from "../src/diff.ts";
 
 const DIFF = [
   "diff --git a/src/cart.ts b/src/cart.ts",
@@ -100,4 +100,13 @@ test("rebaseRanges re-keys to the subdirectory and drops files outside it", () =
   ]);
   assert.deepEqual([...rebaseRanges(ranges, "packages/pkg/")], [["test/a.test.ts", [[1, 2]]]]);
   assert.equal(rebaseRanges(ranges, ""), ranges);
+});
+
+test("binaryFiles reads the binary entries of a NUL-separated numstat", () => {
+  assert.deepEqual(binaryFiles("1\t0\ta.ts\0-\t-\tt\u00e9st.test.ts\0-\t-\twith space.png\0"), ["t\u00e9st.test.ts", "with space.png"]);
+});
+
+test("splitDiffByFile names a binary section by its diff --git line", () => {
+  const d = "diff --git a/x y.png b/x y.png\nindex 1..2 100644\nBinary files a/x y.png and b/x y.png differ\n";
+  assert.deepEqual([...splitDiffByFile(d).keys()], ["x y.png"]);
 });

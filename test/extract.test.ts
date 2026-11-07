@@ -168,3 +168,9 @@ test("extractTests keeps a tagged-template describe.each suite in the chain and 
     [["row $a"], true],
   ]);
 });
+
+test("extractTests keeps a title with an escaped backslash static", () => {
+  const src = "import { it } from 'vitest';\nit('C:\\\\path', () => {});\nit('a\\\\n', () => {});";
+  const found = extractTests(src, "a.test.ts", "vitest");
+  assert.deepEqual(found.map((t) => [t.titlePath[0], t.dynamic]), [["C:\\path", false], ["a\\n", false]]);
+});
